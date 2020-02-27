@@ -1,91 +1,104 @@
 #include "Processor.h"
-#include "ComputerSystem.h"
+#include "ProcessorBase.h"
+#include "OperatingSystem.h"
 #include "Buses.h"
 #include <stdio.h>
 #include <string.h>
-#include <stdlib.h>
 
-// Local Functions prototypes
-void Processor_FetchInstruction();
+// Internals Functions prototypes
+
+int Processor_FetchInstruction();
 void Processor_DecodeAndExecuteInstruction();
 void Processor_ManageInterrupts();
-int Processor_DecodeOperationCode(BUSDATACELL);
-int Processor_DecodeOperand1(BUSDATACELL);
-int Processor_DecodeOperand2(BUSDATACELL);
-void Processor_GetCodedInstruction(char * , BUSDATACELL);
+
+// External data
+extern char *InstructionNames[];
 
 // Processor registers
 int registerPC_CPU; // Program counter
 int registerAccumulator_CPU; // Accumulator
 BUSDATACELL registerIR_CPU; // Instruction register
-unsigned int registerPSW_CPU; // Processor state word
+unsigned int registerPSW_CPU = 128; // Processor state word, initially protected mode
 int registerMAR_CPU; // Memory Address Register
 BUSDATACELL registerMBR_CPU; // Memory Buffer Register
 int registerCTRL_CPU; // Control bus Register
 
-enum Instruction
-{
-NONEXISTING_INST,
-#define INST(name) name ## _INST, // name ## _INST concatena y define los enumerados ADD_INST y SUB_INST
-#include "Instructions.def"
-#undef INST
-LAST_INST,
-};
+int registerA_CPU; // General purpose register
 
-char *InstructionNames[] = {
-"NONEXISTING_INSTRUCTION",
-#define INST(name) #name, // #name Convierte el parametro name a String
-#include "Instructions.def"
-#undef INST
-};
+int interruptLines_CPU; // Processor interrupt lines
 
+// interrupt vector table: an array of handle interrupt memory addresses routines  
+int interruptVectorTable[INTERRUPTTYPES];
 
-// Initialize processor registers
-void Processor_InitializeRegisters(int regPC, int regAcum, unsigned int regPSW) {
-	registerPC_CPU=regPC;
-	registerAccumulator_CPU=regAcum;
-	registerPSW_CPU=regPSW;
+// For PSW show "--------X---FNZS"
+char pswmask []="----------------"; 
+
+// Initialization of the interrupt vector table
+void Processor_InitializeInterruptVectorTable(int interruptVectorInitialAddress) {
+	int i;
+	for (i=0; i< INTERRUPTTYPES;i++)  // Inicialice all to inicial IRET
+		interruptVectorTable[i]=interruptVectorInitialAddress-2;  
+
+	interruptVectorTable[SYSCALL_BIT]=interruptVectorInitialAddress;  // SYSCALL_BIT=2
+	interruptVectorTable[EXCEPTION_BIT]=interruptVectorInitialAddress+2; // EXCEPTION_BIT=6
 }
+
 
 // This is the instruction cycle loop (fetch, decoding, execution, etc.).
 // The processor stops working when an POWEROFF signal is stored in its
 // PSW register
 void Processor_InstructionCycleLoop() {
 
-	while (registerPSW_CPU!=POWEROFF) {
-		Processor_FetchInstruction();
-		Processor_DecodeAndExecuteInstruction();
-		Processor_ManageInterrupts();
+	while (!Processor_PSW_BitState(POWEROFF_BIT)) {
+		if (Processor_FetchInstruction()==CPU_SUCCESS){
+			Processor_DecodeAndExecuteInstruction();
+		}
+		if (interruptLines_CPU){
+			Processor_ManageInterrupts();
+		}
 	}
 }
 
 // Fetch an instruction from main memory and put it in the IR register
-void Processor_FetchInstruction() {
+int Processor_FetchInstruction() {
 
-	// The instruction must be located at the memory address pointed by the PC register
+	// The instruction must be located at the logical memory address pointed by the PC register
 	registerMAR_CPU=registerPC_CPU;
-	// Send to the main memory controller the address in which the reading has to take place: use the address bus for this
-	Buses_write_AddressBus_From_To(CPU, MAINMEMORY);
+	// Send to the MMU the address in which the reading has to take place: use the address bus for this
+	Buses_write_AddressBus_From_To(CPU, MMU);
 	// Tell the main memory controller to read
 	registerCTRL_CPU=CTRLREAD;
-	Buses_write_ControlBus_From_To(CPU,MAINMEMORY);
+	Buses_write_ControlBus_From_To(CPU,MMU);
 
-	// All the read data is stored in the MBR register. Because it is an instruction
-	// we have to copy it to the IR register
-	memcpy((void *) (&registerIR_CPU), (void *) (&registerMBR_CPU), sizeof(BUSDATACELL));
-	// Show initial part of HARDWARE message with Operation Code and operands
-	char codedInstruction[13]; // Coded instruction with separated fields to show
-	Processor_GetCodedInstruction(codedInstruction,registerIR_CPU);
-	ComputerSystem_DebugMessage(1, HARDWARE, codedInstruction);
+	if (registerCTRL_CPU && CTRL_SUCCESS) {
+		// All the read data is stored in the MBR register. Because it is an instruction
+		// we have to copy it to the IR register
+		memcpy((void *) (&registerIR_CPU), (void *) (&registerMBR_CPU), sizeof(BUSDATACELL));
+		// Show initial part of HARDWARE message with Operation Code and operands
+		// Show message: operationCode operand1 operand2
+		char codedInstruction[13]; // Coded instruction with separated fields to show
+		Processor_GetCodedInstruction(codedInstruction,registerIR_CPU);
+		ComputerSystem_DebugMessage(68, HARDWARE, codedInstruction);
+	}
+	else {
+		// Show message: "_ _ _ "
+		ComputerSystem_DebugMessage(100,HARDWARE,"_ _ _\n");
+		return CPU_FAIL;
+	}
+	return CPU_SUCCESS;
+}
 
-}	
 
 // Decode and execute the instruction in the IR register
 void Processor_DecodeAndExecuteInstruction() {
+	int tempAcc; // for save accumulator if necesary
+
 	// Decode
 	int operationCode=Processor_DecodeOperationCode(registerIR_CPU);
 	int operand1=Processor_DecodeOperand1(registerIR_CPU);
 	int operand2=Processor_DecodeOperand2(registerIR_CPU);
+
+	Processor_DeactivatePSW_Bit(OVERFLOW_BIT);
 
 	// Execute
 	switch (operationCode) {
@@ -93,12 +106,37 @@ void Processor_DecodeAndExecuteInstruction() {
 		// Instruction ADD
 		case ADD_INST:
 			registerAccumulator_CPU= operand1 + operand2;
+			Processor_CheckOverflow(operand1,operand2);
 			registerPC_CPU++;
 			break;
 		
 		// Instruction SHIFT (SAL and SAR)
 		case SHIFT_INST: 
-			operand1<0 ? (registerAccumulator_CPU <<= (-operand1)) : (registerAccumulator_CPU >>= operand1);
+			  if (operand1<0) { // SAL do not allow more than 31 bists shift...
+			  	if (registerAccumulator_CPU & (-1<<(sizeof(int)*8-((-operand1)&0x1f)))) // some bit overflow...
+			  		Processor_ActivatePSW_Bit(OVERFLOW_BIT);
+			  	registerAccumulator_CPU <<= ((-operand1) & 0x1f);// unnecesary & because Intel make this way...
+			  } 
+			  else	// SAR do not allow more than 31 bists shift...
+			  	registerAccumulator_CPU >>= operand1 & 0x1f;// unnecesary & because Intel make this way...
+			  
+			  registerPC_CPU++;
+			  break;
+		
+		// Instruction DIV
+		case DIV_INST: 
+			if (operand2 == 0)
+				Processor_RaiseInterrupt(EXCEPTION_BIT); 
+			else {
+				registerAccumulator_CPU=operand1 / operand2;
+				registerPC_CPU++;
+			}
+			break;
+			  
+		// Instruction TRAP
+		case TRAP_INST: 
+			Processor_RaiseInterrupt(SYSCALL_BIT);
+			registerA_CPU=operand1;
 			registerPC_CPU++;
 			break;
 		
@@ -113,8 +151,8 @@ void Processor_DecodeAndExecuteInstruction() {
 			break;
 			  
 		// Instruction ZJUMP
-		case ZJUMP_INST: 
-			if (registerAccumulator_CPU==0)
+		case ZJUMP_INST: // Jump if ZERO_BIT on
+			if (Processor_PSW_BitState(ZERO_BIT))
 				registerPC_CPU+= operand1;
 			else
 				registerPC_CPU++;
@@ -122,32 +160,26 @@ void Processor_DecodeAndExecuteInstruction() {
 
 		// Instruction WRITE
 		case WRITE_INST: 
-			// Tell the main memory controller what
-			registerMBR_CPU.cell= registerAccumulator_CPU;
+			registerMBR_CPU.cell=registerAccumulator_CPU;
+			registerMAR_CPU=operand1;
 			// Send to the main memory controller the data to be written: use the data bus for this
 			Buses_write_DataBus_From_To(CPU, MAINMEMORY);
-			// Tell the main memory controller where
-			registerMAR_CPU=operand1;
-			// Send to the main memory controller the address in which the writing has to take place: use the address bus for this
-			Buses_write_AddressBus_From_To(CPU, MAINMEMORY);
-			// Tell the main memory controller the operation
+			// Send to the MMU controller the address in which the writing has to take place: use the address bus for this
+			Buses_write_AddressBus_From_To(CPU, MMU);
+			// Tell the MMU controller to write
 			registerCTRL_CPU=CTRLWRITE;
-			// Send to the main memory controller the operation
-			Buses_write_ControlBus_From_To(CPU,MAINMEMORY);
-
+			Buses_write_ControlBus_From_To(CPU,MMU);
 			registerPC_CPU++;
 			break;
 
 		// Instruction READ
 		case READ_INST: 
-			// Tell the main memory controller from where
 			registerMAR_CPU=operand1;
-			// Send to the main memory controller the address in which the reading has to take place: use the address bus for this
-			Buses_write_AddressBus_From_To(CPU, MAINMEMORY);
-			// Tell the main memory controller to read
+			// Send to the MMU controller the address in which the reading has to take place: use the address bus for this
+			Buses_write_AddressBus_From_To(CPU, MMU);
+			// Tell the MMU controller to read
 			registerCTRL_CPU=CTRLREAD;
-			// Send to the main memory controller the operation
-			Buses_write_ControlBus_From_To(CPU,MAINMEMORY);
+			Buses_write_ControlBus_From_To(CPU,MMU);
 
 			// Copy the read data to the accumulator register
 			registerAccumulator_CPU= registerMBR_CPU.cell;
@@ -156,116 +188,87 @@ void Processor_DecodeAndExecuteInstruction() {
 
 		// Instruction INC
 		case INC_INST: 
-			registerAccumulator_CPU+= operand1;
+			tempAcc=registerAccumulator_CPU;
+			registerAccumulator_CPU += operand1;
+			Processor_CheckOverflow(tempAcc,operand1);
 			registerPC_CPU++;
 			break;
 
 		// Instruction HALT
 		case HALT_INST: 
-			registerPSW_CPU=POWEROFF;
-			break;
-
-		// Instruction MEMADD
-		case MEMADD_INST:
-			// Tell the main memory controller from where
-			registerMAR_CPU = operand2;
-			// Send to the main memory controller the address in which the reading has to take place: use the address bus for this
-			Buses_write_AddressBus_From_To(CPU, MAINMEMORY);
-			// Tell the main memory controller to read
-			registerCTRL_CPU=CTRLREAD;
-			// Send to the main memory controller the operation
-			Buses_write_ControlBus_From_To(CPU,MAINMEMORY);
-			// Copy the read data to the accumulator register
-			registerAccumulator_CPU = registerMBR_CPU.cell;
-
-			registerAccumulator_CPU = operand1 + registerAccumulator_CPU;
-			registerPC_CPU++;
+			Processor_ActivatePSW_Bit(POWEROFF_BIT);
 			break;
 			  
+		// Instruction OS
+		case OS_INST: // Make a operating system routine in entry point indicated by operand1
+			// Show final part of HARDWARE message with CPU registers
+			// Show message: " (PC: registerPC_CPU, Accumulator: registerAccumulator_CPU, PSW: registerPSW_CPU [Processor_ShowPSW()]\n
+			ComputerSystem_DebugMessage(69, HARDWARE,InstructionNames[operationCode],operand1,operand2,registerPC_CPU,registerAccumulator_CPU,registerPSW_CPU,Processor_ShowPSW());
+			// Not all operating system code is executed in simulated processor, but really must do it... 
+			OperatingSystem_InterruptLogic(operand1);
+			registerPC_CPU++;
+			// Update PSW bits (ZERO_BIT, NEGATIVE_BIT, ...)
+			Processor_UpdatePSW();
+			return; // Note: message show before... for operating system messages after...
+
+		// Instruction IRET
+		case IRET_INST: // Return from a interrupt handle manager call
+			registerPC_CPU=Processor_CopyFromSystemStack(MAINMEMORYSIZE-1);
+			registerPSW_CPU=Processor_CopyFromSystemStack(MAINMEMORYSIZE-2);
+			break;		
+
 		// Unknown instruction
-		default : registerPC_CPU++;
-			  break;
+		default : 
+			registerPC_CPU++;
+			break;
 	}
+	
+	// Update PSW bits (ZERO_BIT, NEGATIVE_BIT, ...)
+	Processor_UpdatePSW();
+	
 	// Show final part of HARDWARE message with	CPU registers
-	ComputerSystem_DebugMessage(3,HARDWARE,InstructionNames[operationCode],operand1,operand2,registerPC_CPU,registerAccumulator_CPU,registerAccumulator_CPU,registerPSW_CPU);
+	// Show message: " (PC: registerPC_CPU, Accumulator: registerAccumulator_CPU, PSW: registerPSW_CPU [Processor_ShowPSW()]\n
+	ComputerSystem_DebugMessage(69, HARDWARE, InstructionNames[operationCode],operand1,operand2,registerPC_CPU,registerAccumulator_CPU,registerPSW_CPU,Processor_ShowPSW());
 }
 	
-// Hardware interrup processing
-// Our primitive processor DOES NOT SUPPORT interrupts
+	
+// Hardware interrupt processing
 void Processor_ManageInterrupts() {
-
-}
-
-// Getter for the registerMAR_CPU
-int Processor_GetMAR() {
-	return registerMAR_CPU;
-}
-
-// Setter for the registerMAR_CPU
-void Processor_SetMAR(int data) {
-	registerMAR_CPU=data;
-}
-
-// pseudo-getter for the registerMBR_CPU
-void Processor_GetMBR(BUSDATACELL *toRegister) {
-	memcpy((void*) toRegister, (void *) (&registerMBR_CPU), sizeof(BUSDATACELL));
-}
-
-// pseudo-setter for the registerMBR_CPU
-void Processor_SetMBR(BUSDATACELL *fromRegister) {
-	memcpy((void*) (&registerMBR_CPU), (void *) fromRegister, sizeof(BUSDATACELL));
-}
-
-// Getter for the registerCTRL_CPU
-int Processor_GetCTRL() {
-	// Only return last byte
-	return registerCTRL_CPU & 0xf;
-}
-
-// Setter for the registerCTRL_CPU
-void Processor_SetCTRL(int ctrl) {
-  	registerCTRL_CPU |= (ctrl & 0xff);
-}
-
-int Processor_Encode(char opCode, int op1, int op2) {
-	int mask=0x7ff; // binary: 0111 1111 1111 
-	int sigOp1=op1<0;
-	op1=sigOp1 ? ((-op1) & mask) : (op1 & mask);
-	int sigOp2=op2<0;
-	op2=sigOp2 ? ((-op2) & mask) : (op2 & mask);
-	int cell=(opCode<<24);
-	cell = cell | (sigOp1<<23) | (op1<<12);
-	cell = cell | (sigOp2<<11) | op2;
-	return cell;
-}
-
-int Processor_DecodeOperationCode(BUSDATACELL memCell) {
-	// return InstructionCode[(memCell.cell>>24) & 0xff];
-	return (memCell.cell>>24) & 0xff;
-}
-
-int Processor_DecodeOperand1(BUSDATACELL memCell) {
-	int sigOp1=memCell.cell & (0x1<<23);
-	int op1=(memCell.cell & (0x7ff<<12))>>12;
-	op1=sigOp1?-op1:op1;
-	return op1;
-}
-
-int Processor_DecodeOperand2(BUSDATACELL memCell) {
-	int sigOp2= memCell.cell & (0x1<<11);
-	int op2=(memCell.cell & (0x7ff));
-	op2=sigOp2?-op2:op2;
-	return op2;
-}
-
-void Processor_GetCodedInstruction(char * result, BUSDATACELL memCell){
-	sprintf(result,"%02X %03X %03X",((registerIR_CPU.cell>>24)&0xff),((registerIR_CPU.cell>>12)&0xfff),(registerIR_CPU.cell&0xfff));
-}
-
-int Processor_ToInstruction(char * operation) {
+  
 	int i;
-	for (i=0;i<LAST_INST;i++)
-		if (strcasecmp(InstructionNames[i],operation)==0)
-			return i;
-	return NONEXISTING_INST;
+
+		for (i=0;i<INTERRUPTTYPES;i++)
+			// If an 'i'-type interrupt is pending
+			if (Processor_GetInterruptLineStatus(i)) {
+				// Deactivate interrupt
+				Processor_ACKInterrupt(i);
+				// Copy PC and PSW registers in the system stack
+				Processor_CopyInSystemStack(MAINMEMORYSIZE-1, registerPC_CPU);
+				Processor_CopyInSystemStack(MAINMEMORYSIZE-2, registerPSW_CPU);	
+				// Activate protected excution mode
+				Processor_ActivatePSW_Bit(EXECUTION_MODE_BIT);
+				// Call the appropriate OS interrupt-handling routine setting PC register
+				registerPC_CPU=interruptVectorTable[i];
+				break; // Don't process another interrupt
+			}
 }
+
+char * Processor_ShowPSW(){
+	strcpy(pswmask,"----------------");
+	int tam=strlen(pswmask)-1;
+	if (Processor_PSW_BitState(EXECUTION_MODE_BIT))
+		pswmask[tam-EXECUTION_MODE_BIT]='X';
+	if (Processor_PSW_BitState(OVERFLOW_BIT))
+		pswmask[tam-OVERFLOW_BIT]='F';
+	if (Processor_PSW_BitState(NEGATIVE_BIT))
+		pswmask[tam-NEGATIVE_BIT]='N';
+	if (Processor_PSW_BitState(ZERO_BIT))
+		pswmask[tam-ZERO_BIT]='Z';
+	if (Processor_PSW_BitState(POWEROFF_BIT))
+		pswmask[tam-POWEROFF_BIT]='S';
+	return pswmask;
+}
+
+
+/////////////////////////////////////////////////////////
+//  New functions below this line  //////////////////////

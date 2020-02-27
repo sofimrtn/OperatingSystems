@@ -2,13 +2,16 @@
 #define SIMULATOR_H
 
 
-// Overall constants
+// General constants for the simulation
 
-// Monoprogrammed system (a very primitive one)
-#define MAXNUMPROCESSES 1
+// Maximum number of programs in the command line plus daemons programs
+#define PROGRAMSMAXNUMBER 20
 
-// Maximum number of user programs in command line (not used in this version)
-#define MAXNUMUSERPROGRAMS 20
+#define MAXLINELENGTH 150
 
+#define PROCESSTABLEMAXSIZE 4
+
+// Main memory size (number of memory cells)
+#define MAINMEMORYSIZE 300
 
 #endif

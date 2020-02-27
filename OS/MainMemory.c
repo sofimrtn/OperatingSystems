@@ -1,6 +1,6 @@
 #include "MainMemory.h"
+#include "Processor.h"
 #include "Buses.h"
-#include "ComputerSystem.h"
 #include <string.h>
 
 // Main memory can be simulated by a memory cell array
@@ -10,11 +10,15 @@ MEMORYCELL mainMemory[MAINMEMORYSIZE];
 // the next read/write operation will take place 
 int registerMAR_MainMemory;
 
-// Main memory has a CTRL (control) register whose value indicates the operation to do
-int registerCTRL_MainMemory;
-
 // It also has a register that plays the rol of a buffer for the mentioned operations
 MEMORYCELL registerMBR_MainMemory;
+
+int registerCTRL_MainMemory;
+
+// Getter for the registerMAR_MainMemory
+int MainMemory_GetMAR() {
+  return registerMAR_MainMemory;
+}
 
 // Setter for registerMAR_MainMemory
 void MainMemory_SetMAR(int addr) {
@@ -40,10 +44,15 @@ int MainMemory_GetCTRL() {
 void MainMemory_SetCTRL(int ctrl) {
 	registerCTRL_MainMemory=ctrl&0x3;
 	switch (registerCTRL_MainMemory) {
+      // To read the contents of a memory cell, the MAR register must point (index) it
+      // The result of the operation is sent to the processor MBR register by using the
+      // data bus
   		case CTRLREAD:
   	 		memcpy((void *) (&registerMBR_MainMemory), (void *) (&mainMemory[registerMAR_MainMemory]), sizeof(MEMORYCELL));
   			Buses_write_DataBus_From_To(MAINMEMORY, CPU);
   			break;
+      // To write in a memory cell, the MAR and MBR registers are used, set by the processor,
+      // as described previously 
   		case CTRLWRITE:
         memcpy((void *) (&mainMemory[registerMAR_MainMemory]), (void *) (&registerMBR_MainMemory), sizeof(MEMORYCELL));
     		break;

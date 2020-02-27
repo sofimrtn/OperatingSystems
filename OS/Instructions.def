@@ -1,10 +1,13 @@
-INST(ADD) 	// decimal 1 = Hex (0x01)
-INST(SHIFT)	// decimal 2 = Hex (0x02)
-INST(NOP)	// decimal 3 = Hex (0x03)
-INST(JUMP)	// decimal 4 = Hex (0x04)
-INST(ZJUMP)	// decimal 5 = Hex (0x05)
-INST(WRITE)	// decimal 6 = Hex (0x06)
-INST(READ)	// decimal 7 = Hex (0x07)
-INST(INC)	// decimal 8 = Hex (0x08)
-INST(HALT)	// decimal 9 = Hex (0x09)
-INST(MEMADD) // decimal 10 = Hex (0x0a)
+INST(ADD) 	// 1	0x01
+INST(SHIFT)	// 2	0x02
+INST(DIV)	// 3	0x03
+INST(TRAP)	// 4	0x04
+INST(NOP)	// 5	0x05
+INST(JUMP)	// 6	0x06
+INST(ZJUMP)	// 7	0x07
+INST(WRITE)	// 8	0x08
+INST(READ)	// 9	0x09
+INST(INC)	// 10	0x0a
+INST(HALT)	// 11	0x0b
+INST(OS)	// 12	0x0c
+INST(IRET)	// 13	0x0d

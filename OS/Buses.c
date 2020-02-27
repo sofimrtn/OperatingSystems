@@ -1,4 +1,5 @@
 #include "Buses.h"
+#include "MMU.h"
 #include "Processor.h"
 #include "MainMemory.h"
 #include <string.h>
@@ -9,6 +10,9 @@
 int Buses_write_AddressBus_From_To(int fromRegister, int toRegister) {
   int data;
   switch (fromRegister) {
+	case MMU:
+	  data=MMU_GetMAR();
+	  break;
 	case CPU:
 	  data=Processor_GetMAR();
 	  break;
@@ -20,12 +24,16 @@ int Buses_write_AddressBus_From_To(int fromRegister, int toRegister) {
 	case MAINMEMORY:
 	  MainMemory_SetMAR(data);
 	  break;
+	case MMU:
+	  if (fromRegister==MMU)
+		return Bus_FAIL;
+	  MMU_SetMAR(data);
+	  break;
 	default:
 	 return Bus_FAIL;
   }
   return Bus_SUCCESS;
 }
-
 
 //  Function that simulates the delivery of memory word by means of the data bus
 //  from a hardware component register to another hardware component register
@@ -43,21 +51,28 @@ int Buses_write_DataBus_From_To(int fromRegister, int toRegister) {
 		default:
 			free(data);
 			return Bus_FAIL;
-  	}
-
+	}
+  
 	switch (toRegister) {
 		case MAINMEMORY:
+			if (fromRegister==MAINMEMORY) {
+				free(data);
+				return Bus_FAIL;
+			}
 			memdata = (*data).cell;
 			MainMemory_SetMBR(&memdata);
-			break;
+	  		break;
 		case CPU:
+			if (fromRegister==CPU) {
+				free(data);
+				return Bus_FAIL;
+			}
 			Processor_SetMBR(data);
-			break;
+			break;;
 		default:
-  			free(data);
+			free(data);
 			return Bus_FAIL;
   	}
-  
 	free(data);
 	return Bus_SUCCESS;
 }
@@ -73,16 +88,31 @@ int Buses_write_ControlBus_From_To(int fromRegister, int toRegister){
 		case CPU:
 			control=Processor_GetCTRL();
 			break;
+		case MMU:
+			control=MMU_GetCTRL();
+			break;
 		default:
 			return Bus_FAIL;
 	}
   
 	switch (toRegister) {
 		case MAINMEMORY:
+			if (fromRegister==MAINMEMORY) {
+				return Bus_FAIL;
+			}
 			MainMemory_SetCTRL(control);
 			break;
 		case CPU:
+			if (fromRegister==CPU) {
+				return Bus_FAIL;
+			}
 			Processor_SetCTRL(control);
+			break;
+		case MMU:
+			if (fromRegister==MMU || fromRegister==MAINMEMORY) {
+				return Bus_FAIL;
+			}
+			MMU_SetCTRL(control);
 			break;
 		default:
 	 		return Bus_FAIL;

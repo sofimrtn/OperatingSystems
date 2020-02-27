@@ -1,21 +1,27 @@
 #ifndef PROCESSOR_H
 #define PROCESSOR_H
 
-#define POWEROFF 1
+#include "MainMemory.h"
+#include "ProcessorBase.h"
 
-#include "Buses.h"
+#define INTERRUPTTYPES 10
+#define CPU_SUCCESS 1
+#define CPU_FAIL 0
+
+// Enumerated type that connects bit positions in the PSW register with
+// processor events and status
+enum PSW_BITS {POWEROFF_BIT=0, ZERO_BIT=1, NEGATIVE_BIT=2, OVERFLOW_BIT=3, EXECUTION_MODE_BIT=7};
+
+// Enumerated type that connects bit positions in the interruptLines with
+// interrupt types 
+enum INT_BITS {SYSCALL_BIT=2, EXCEPTION_BIT=6};
 
 // Functions prototypes
-void Processor_InitializeRegisters(int, int, unsigned int);
+void Processor_InitializeInterruptVectorTable();
 void Processor_InstructionCycleLoop();
-int Processor_Encode(char, int, int);
-int Processor_ToInstruction(char *); 
+void Processor_RaiseInterrupt(const unsigned int);
 
-// Buses needs to access MAR, MBR and CTRL
-int Processor_GetMAR();
-void Processor_SetMAR(int);
-void Processor_GetMBR(BUSDATACELL *);
-void Processor_SetMBR(BUSDATACELL *);
+char * Processor_ShowPSW();
 int Processor_GetCTRL();
 void Processor_SetCTRL(int);
 

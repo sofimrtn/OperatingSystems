@@ -1,18 +1,22 @@
 #ifndef MESSAGES_H
 #define MESSAGES_H
 
-#define NUMBEROFMSGS 64
+#define NUMBEROFMSGS 100
 #define MSGMAXIMUMLENGTH 132
+
+
+#define STUDENT_MESSAGES_FILE "messagesSTD.txt"
+#define TEACHER_MESSAGES_FILE "messagesTCH.txt"
 
 typedef struct {
   int number;
   char format[MSGMAXIMUMLENGTH];
 } DEBUG_MESSAGES;
 
-DEBUG_MESSAGES DebugMessages[NUMBEROFMSGS];
+extern DEBUG_MESSAGES DebugMessages[NUMBEROFMSGS];
 
 int Messages_Get_Pos(int number);
-int Messages_Load_Messages();
+int Messages_Load_Messages(int, char *);
 
 #endif
 
