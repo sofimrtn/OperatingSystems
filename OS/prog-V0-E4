@@ -1,0 +1,12 @@
+55
+MEMADD 20 99
+WRITE 99 //20 stored in memory position 99.
+MEMADD 2 99 //add 2 to the value stored in memory position 99. That way we get the even numbers.
+WRITE 99 //we store the new value again in memory position 99.
+INC -40 //when value = 40 if we decrease 40 the result will be 0 
+ZJUMP 2 //if value = 0, then HALT.
+JUMP -4 //if not 0, then back to write.
+HALT
+
+
+
